@@ -1,0 +1,40 @@
+Package: istv
+Type: Package
+Title: Information Sharing to Tackle Violence geocoding
+Version: 0.1.0
+Description: Provides functions for matching text contained in assault location 
+    description to real world locations.
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 3.5)
+Imports: 
+    doc2vec,
+    hunspell,
+    phonics,
+    sf,
+    tidytext,
+    dplyr,
+    stringr,
+    fs,
+    purrr,
+    readr,
+    tibble,
+    tidyr,
+    usethis,
+    word2vec,
+    magrittr,
+    utils,
+    workflows,
+    parsnip
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Authors@R: 
+    person("Michael", "Cheetham", , "michael.cheetham@nhs.net", role = c("aut", "cre"))
+Suggests: 
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+VignetteBuilder: knitr

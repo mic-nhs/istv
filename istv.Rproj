@@ -1,0 +1,23 @@
+Version: 1.0
+ProjectId: b14af62d-413c-49c0-ae66-847824e1d289
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: Sweave
+LaTeX: pdfLaTeX
+
+AutoAppendNewline: Yes
+StripTrailingWhitespace: Yes
+
+BuildType: Package
+PackageInstallArgs: --no-multiarch --with-keep.source
+PackageBuildArgs: --no-manual
+PackageBuildBinaryArgs: --no-manual
+PackageCheckArgs: --no-manual
