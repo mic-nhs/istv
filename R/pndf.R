@@ -106,7 +106,8 @@ make_pndf <- function(paf_file = NULL,
 
   # read in country names as a start
 
-  pndf <- istv::countries
+  pndf <- istv::countries %>%
+    dplyr::mutate(pcd = NA_character_)
 
   # process the PAF file
 
@@ -245,6 +246,65 @@ make_pndf <- function(paf_file = NULL,
         id = stringr::str_replace(.data$id, "hmp", "prison")
       )
 
+    # schools have a large range of equivalent phrases
+    #
+
+    # these can all be missing
+    # infant/infants/primary/junior/secondary/high/sixth form/church of england/c of e/roman catholic/catholic/rc/community
+    #
+    # these can be synonyms
+    # academy/school/college/primary/junior/secondary/high
+    #
+
+    edu <- paf %>%
+      filter(str_detect(name, "(school)|(college)|(academy)"), class == "org", str_starts(name, "\\d", negate = TRUE)) %>%
+      filter(str_starts(name, "(school)|(college)|(academy)", negate = TRUE)) %>%
+      filter(str_detect(name, "(hospital)|(nursery)|(university)", negate = TRUE))
+
+    # these can all be missing
+    # infant/infants/primary/junior/secondary/high/sixth form/church of england/c of e/roman catholic/catholic/rc/community
+    #
+    # these can be synonyms
+    # academy/school/college/primary/junior/secondary/high
+    #
+
+    edu2 <- edu %>%
+      dplyr::mutate(name = str_replace(name, "((for )?girls?)|((for )?boys?)", " ") %>%
+              stringr::str_replace("(infants?)", " ") %>%
+              stringr::str_replace("(primary)|(junior)", " ") %>%
+              stringr::str_replace("(secondary)|(high)|(sixth form)", " ") %>%
+              stringr::str_replace("(church of england)|(c of e)|((roman)? catholic)|(rc)|(community)", " ") %>%
+              stringr::str_squish())
+
+    edu3 <- edu2 %>%
+      dplyr::mutate(name = stringr::str_replace(name, "school", "college") %>%
+                      stringr::str_replace("academy", "school") %>%
+                      stringr::str_squish())
+
+    edu4 <- edu2 %>%
+      dplyr::mutate(name = stringr::str_replace(name, "college", "school") %>%
+                      stringr::str_replace("academy", "college") %>%
+                      stringr::str_squish())
+
+
+
+    edu_out <- dplyr::bind_rows(edu, edu2, edu3, edu4) %>%
+      dplyr::distinct() %>%
+      dplyr::left_join(edu2 %>% dplyr::select(id, name) %>% dplyr::mutate(source="edu2"),
+                dplyr::join_by(id, name)) %>%
+      dplyr::left_join(edu3 %>% dplyr::select(id, name) %>% dplyr::mutate(source="edu3"),
+                dplyr::join_by(id, name)) %>%
+      dplyr::left_join(edu4 %>% dplyr::select(id, name) %>% dplyr::mutate(source="edu3"),
+                dplyr::join_by(id, name)) %>%
+      dplyr::mutate(dplyr::across(
+        dplyr::contains("source"), ~dplyr::if_else(is.na(.x), "", .x))
+      ) %>%
+      dplyr::mutate(id = paste0(id, source, source.x, source.y)) %>%
+      dplyr::select(-contains("source")) %>%
+      dplyr::filter(str_detect(id, "edu"))
+
+
+
     # create a data frame with all the postcodes
 
     pcs <- paf %>%
@@ -344,7 +404,7 @@ make_pndf <- function(paf_file = NULL,
       ) %>%
       dplyr::left_join(
         towns %>% dplyr::select(name, id),
-        join_by(townname == name),
+        dplyr::join_by(townname == name),
         suffix = c("", "_parent")
       ) %>%
       dplyr::select(-townname)
@@ -380,15 +440,15 @@ make_pndf <- function(paf_file = NULL,
     raw_stations <- raw_stations %>%
       dplyr::anti_join(
         towns %>% dplyr::distinct(.data$name),
-        join_by(name)
+        dplyr::join_by(name)
       ) %>%
       dplyr::anti_join(
         localities %>% dplyr::distinct(.data$name),
-        join_by(name)
+        dplyr::join_by(name)
       ) %>%
       dplyr::anti_join(
         streets %>% dplyr::distinct(.data$name),
-        join_by(name)
+        dplyr::join_by(name)
       )
 
     # ditto organizations
@@ -413,9 +473,9 @@ make_pndf <- function(paf_file = NULL,
       dplyr::mutate(class = "org") %>%
       dplyr::left_join(
         streets %>% dplyr::select(name, id_parent, id),
-        join_by(
-          .data$streetname == .data$name,
-          .data$pcd == .data$id_parent
+        dplyr::join_by(
+          streetname == name,
+          pcd == id_parent
         ),
         suffix = c("", "_parent")
       ) %>%
@@ -441,9 +501,9 @@ make_pndf <- function(paf_file = NULL,
       dplyr::mutate(class = "org", id = paste0("n_", as.character(.data$id))) %>%
       dplyr::left_join(
         streets %>% dplyr::select(name, id_parent, id),
-        join_by(
-          .data$streetname == .data$name,
-          .data$pcd == .data$id_parent
+        dplyr::join_by(
+          streetname == name,
+          pcd == id_parent
         ),
         suffix = c("", "_parent")
       ) %>%
@@ -463,6 +523,7 @@ make_pndf <- function(paf_file = NULL,
       streets,
       localities,
       towns,
+      edu_out,
       pndf
     )
   }
@@ -515,8 +576,8 @@ make_pndf <- function(paf_file = NULL,
         id_parent,
         class
       ) %>%
-      add_row(
-        id = c("northlondon", "southlondon", "westlondon", "southlondon"),
+      tibble::add_row(
+        id = c("northlondon", "southlondon", "westlondon", "eastlondon"),
         name = c("north london", "south london", "west london", "east london"),
         easting = NA,
         northing = NA,
@@ -534,7 +595,7 @@ make_pndf <- function(paf_file = NULL,
           openname %>%
             dplyr::distinct(.data$name) %>%
             dplyr::mutate(name = stringr::str_to_upper(.data$name)),
-          join_by(name)
+          dplyr::join_by(name)
         )
     }
 
@@ -547,17 +608,17 @@ make_pndf <- function(paf_file = NULL,
     message("reading greenspace")
 
     greenspace <- greenspace_files %>%
-      purrr::map(~ read_sf(.x, quiet = TRUE)) %>%
+      purrr::map(~ sf::read_sf(.x, quiet = TRUE)) %>%
       dplyr::bind_rows() %>%
       dplyr::filter(!is.na(.data$distName1)) %>%
       sf::st_centroid() %>%
       dplyr::mutate(
-        easting = sf::st_coordinates(.data)[, 1],
-        northing = sf::st_coordinates(.data)[, 2],
+        easting = sf::st_coordinates(geometry)[, 1],
+        northing = sf::st_coordinates(geometry)[, 2],
         class = "greenspace"
       ) %>%
       tibble::as_tibble() %>%
-      dplyr::rename(name = .data$distName1) %>%
+      dplyr::rename(name = distName1) %>%
       dplyr::select(
         id,
         name,
@@ -623,28 +684,33 @@ make_pndf <- function(paf_file = NULL,
 
     pcd_sf <- dir(postcode_poly_dir,
                   pattern = "*.shp",
-                  full.names = TRUE
-    ) %>%
-      purrr::map(~ sf::st_read(.x, quiet = TRUE)) %>%
+                  full.names = TRUE) %>%
+      purrr::map(~sf::st_read(.x, quiet = TRUE) %>%
+            dplyr::filter(stringr::str_detect(POSTCODE, " ")) %>%
+            tidyr::separate_wider_delim(POSTCODE, delim = " ", names = c("pcd","pca")) %>%
+            dplyr::group_by(pcd) %>%
+            dplyr::summarise(across(geometry, ~ sf::st_union(.)), .groups = "keep") %>%
+            dplyr::summarise(across(geometry, ~ sf::st_combine(.))) %>%
+            sf::st_as_sf(), .progress = TRUE) %>%
       dplyr::bind_rows() %>%
-      dplyr::mutate(pcd = stringr::str_extract(.data$POSTCODE, "([:alnum:]*)(\\s[:alnum:]*)", 1)) %>%
-      dplyr::group_by(.data$pcd) %>%
-      dplyr::summarize(geometry = sf::st_union(.data$geometry)) %>%
-      dplyr::ungroup() %>%
-      dplyr::filter(!is.na(.data$pcd))
+      sf::st_exterior_ring()
 
     pndf_sf <- sf::st_as_sf(pndf %>% dplyr::filter(!is.na(.data$easting)),
                             coords = c("easting", "northing")
     )
     sf::st_crs(pndf_sf) <- sf::st_crs(pcd_sf)
 
-    pcd_lookup <- sf::st_join(pndf_sf, pcd_sf) %>%
+    pcd_lookup <- sf::st_join(pndf_sf %>% dplyr::select(-pcd), pcd_sf) %>%
       tibble::as_tibble() %>%
       dplyr::select(id, pcd) %>%
       dplyr::mutate(pcd = stringr::str_to_lower(.data$pcd))
 
-    pndf <- pndf %>%
-      dplyr::left_join(pcd_lookup, join_by(id))
+    pndf <- pndf %>% dplyr::filter(!is.na(pcd)) %>%
+      dplyr::bind_rows(
+        pndf %>% dplyr::filter(is.na(pcd)) %>%
+          dplyr::select(-pcd) %>%
+          dplyr::left_join(pcd_lookup, dplyr::join_by(id))
+      )
   }
 
   # assign LSOAs - this only works for locations in England and Wales obvs
@@ -661,7 +727,7 @@ make_pndf <- function(paf_file = NULL,
       dplyr::filter(!is.na(.data$LSOA21CD))
 
     pndf <- pndf %>%
-      dplyr::left_join(lsoa_lookup, join_by(id)) %>%
+      dplyr::left_join(lsoa_lookup, dplyr::join_by(id)) %>%
       dplyr::filter(!(
         .data$class %in% c("greenspace", "landform") &
           is.na(.data$LSOA21CD)
@@ -687,8 +753,9 @@ make_pndf <- function(paf_file = NULL,
     dplyr::mutate(name = dplyr::if_else(
       class %in% c("pc2", "pcd", "pc"),
       stringr::str_to_lower(.data$name),
-      .data$ald_clean
-    )) %>%
+      .data$ald_clean),
+      fulladdress = stringr::str_replace(fulladdress, ".*?, ", "") # added to make full address easier to read when consolidating orgs
+    ) %>%
     dplyr::select(-ald_clean)
 
   # make class a factor from most to least granular features (roughly)
@@ -706,6 +773,39 @@ make_pndf <- function(paf_file = NULL,
   }
 
   return(pndf)
+}
+
+#' precalculates word and phonetic tokens for a given place name data frame
+#' this will take hours on most desktop machines but once done substantially
+#' speeds up geocoding
+#'
+#' @param pndf data frame with (at least) columns id and name
+#' @param ngram_max integer the longest ngram to calculate
+#'
+#' @details saves the output data frame to the package object pndf_tokens,
+#' overwrites previous versions
+#'
+#' @returns data frame invisible, with columns id, token, phon, n, nword, nstop
+#' as documented in match_place function
+#'
+#' @export
+
+precalculate_pndf_tokens <- function(pndf, ngram_max = 2, write = TRUE) {
+
+  pndf_tokens <- pndf %>%
+    dplyr::mutate(l = purrr::map(name, ~allgrams_tibble(.x, ngram_max = ngram_max), .progress = FALSE)) %>%
+    tidyr::unnest(cols = l) %>%
+    dplyr::select(id, token:nstop)
+
+  if (write) {
+
+    usethis::use_data(pndf_tokens, overwrite = TRUE)
+
+
+  }
+
+  invisible(pndf_tokens)
+
 }
 
 #' filter a place name file to be within a certain distance of a point
@@ -732,6 +832,10 @@ filter_pndf <- function(x = 531370,
     pndf <- istv::pndf
   }
 
+  # this adds in n/s/w/e london if needed
+
+  pf <- pndf %>% dplyr::filter(is.na(easting), class != "country")
+
   xmin <- x - r
   xmax <- x + r
   ymin <- y - r
@@ -744,4 +848,15 @@ filter_pndf <- function(x = 531370,
       .data$northing < ymax,
       .data$northing > ymin
     )
+
+  if (NROW(pf) >0) {
+
+    pndf_filtered <- pndf_filtered %>%
+      dplyr::bind_rows(pf)
+
+  }
+
+  return(pndf_filtered)
 }
+#
+#

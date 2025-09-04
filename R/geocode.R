@@ -5,12 +5,16 @@
 #' location description field
 #' @param pndf data frame a place name data frame such as that supplied by istv::pndf
 #' @param mcl integer for phonetic encoding as documented in phonics::refinedSoundex
+#' @param precalc_tokens data frame if supplied contains previously calculated tokens
+#' and phonetic encoding for pndf. If NULL will calculate.
+#'
+#' @details supplying precalc_tokens will make this quite a bit quicker
 #'
 #' @returns all possible candidate matches
 #'
 #' @export
 
-match_place <- function(x, pndf, mcl = 10) {
+match_place <- function(x, pndf, mcl = 10, precalc_tokens = NULL, ngram_max = 3, modify_words = NULL) {
   # create a unigram representation of the assault location description string
   # remove all words containing both strings and numbers or just numbers - if not
   # done this screws up soundex
@@ -18,79 +22,31 @@ match_place <- function(x, pndf, mcl = 10) {
   # possibly consider MRA for better matching
   #
 
-  # the following could be made much more efficient
-
-  x <- tibble::tibble(x = x) %>%
-    tidytext::unnest_tokens(.data$token, x, "words") %>%
-    dplyr::filter(stringr::str_detect(.data$token, "\\d", negate = TRUE))
-
-  n_string <- NROW(x)
-
-  # the unigrams and their phonetic matches, as well as whether the original
-  # token is a word or a stopword (similarly done for place_name_list)
-
-  x_unigram_phon <- x %>%
-    dplyr::mutate(phon = phonics::refinedSoundex(
-      stringr::str_replace(.data$token, "([a-z]{2,})(s)$", "\\1"),
-      mcl,
-      clean = FALSE
-    )) %>%
-    dplyr::mutate(
-      n = 1,
-      isword = as.numeric(word_check(.data$token)),
-      isstop = as.numeric(stopword_check(.data$token))
-    )
-
-  # the original phrase as a series of tokens and phonetic matches
-
-  x_phon <- x_unigram_phon %>%
-    dplyr::select(phon, token) %>%
-    dplyr::summarize(phon = paste0(.data$phon, collapse = " "))
-
-  # and now for efficiency with longer phrases (more important for the
-  # place_name_list) remove duplicates
-
-  x_unigram_phon <- x_unigram_phon %>%
-    dplyr::distinct()
-
-  # create table of uni-tri grams
+  # len_target         number of words in target string
+  # len_cand           number of words in candidate string
+  # n                  indicates unigram, bigram, trigram
+  # nword              indicates the number of dictionary words in the ngram
+  # nstop              indictates the number of stop words in the ngram
+  # _cand suffix       indicates candidate (i.e. pulled from place name list)
+  # _target suffix     indicates target (i.e. pulled from the string to be matched)
+  # token_match        percentage of the words in the target that are token rather than phon
+  #                    matches for the candidate
+  # plural_match       indicates that the target and candidate match on token plural - especially
+  #                    useful for thinks like Sainsbury(s)
+  # pc_match_cand      the length of the target ngram over the total length of the candidate
+  # pc_match_target    the length of the candidate ngram over the total length of the target, i.e. if this exceeds 1 then the candidate is longer than the target
   #
 
-  x_bigram_phon <- x_phon %>%
-    tidytext::unnest_tokens(.data$phon,
-      .data$phon,
-      "ngrams",
-      n = 2,
-      to_lower = FALSE
-    ) %>%
-    dplyr::mutate(col = stringr::str_split(.data$phon, " ")) %>%
-    tidyr::unnest(col) %>%
-    dplyr::left_join(x_unigram_phon, join_by(col == phon)) %>%
-    dplyr::group_by(.data$phon) %>%
-    dplyr::summarize(
-      token = paste0(.data$token, collapse = " "),
-      isword = sum(.data$isword),
-      isstop = sum(.data$isstop)
-    ) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(n = 2)
+  # deal with zero length or all whitespace strings
 
-  x_trigram_phon <- x_phon %>%
-    tidytext::unnest_tokens(.data$phon, .data$phon, "ngrams", n = 3, to_lower = FALSE) %>%
-    dplyr::mutate(col = stringr::str_split(.data$phon, " ")) %>%
-    tidyr::unnest(col) %>%
-    dplyr::left_join(x_unigram_phon, join_by(col == phon)) %>%
-    dplyr::group_by(.data$phon) %>%
-    dplyr::summarize(
-      token = paste0(.data$token, collapse = " "),
-      isword = sum(.data$isword),
-      isstop = sum(.data$isstop)
-    ) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(n = 3)
+  zerolen <- stringr::str_replace_all(x, "\\s", "")
 
-  x_phon_ngrams <- dplyr::bind_rows(x_unigram_phon, x_bigram_phon, x_trigram_phon) %>%
-    dplyr::filter(!is.na(.data$phon))
+  if (zerolen == "") {return(make_candidate_df())}
+
+  # the following could be made much more efficient
+
+  target <- allgrams_tibble(x, mcl = mcl, ngram_max = ngram_max, modify_words = modify_words) %>%
+    dplyr::mutate(len_target = dplyr::if_else(n == 1, 1, 0) %>% sum())
 
   # duplicate entries with street/saint abbreviations
   # if st at the end of an ngram duplicate it and replace with "street"
@@ -98,7 +54,7 @@ match_place <- function(x, pndf, mcl = 10) {
   # ignore unigrams
   #
 
-  street_entries <- x_phon_ngrams %>%
+  street_entries <- target %>%
     dplyr::filter(n > 1, stringr::str_detect(.data$phon, paste0(
       " ", phonics::refinedSoundex("st", mcl), "$"
     ))) %>%
@@ -108,7 +64,7 @@ match_place <- function(x, pndf, mcl = 10) {
       paste0(" ", phonics::refinedSoundex("street", mcl))
     ))
 
-  saint_entries <- x_phon_ngrams %>%
+  saint_entries <- target %>%
     dplyr::filter(n > 1, stringr::str_detect(.data$phon, paste0(
       "^", phonics::refinedSoundex("st", mcl), " "
     ))) %>%
@@ -118,100 +74,38 @@ match_place <- function(x, pndf, mcl = 10) {
       paste0(" ", phonics::refinedSoundex("saint", mcl))
     ))
 
-  x_phon_ngrams <- x_phon_ngrams %>%
+  target <- target %>%
     dplyr::bind_rows(street_entries, saint_entries)
 
   # create a map of all the token-phonetic match pairs in the filtered
   # version of the place_name_list
 
-  pndf_phon_map <- pndf %>%
-    dplyr::select(name) %>%
-    tidytext::unnest_tokens(.data$token, .data$name, "words") %>%
-    dplyr::distinct() %>%
-    dplyr::mutate(
-      isword = word_check(.data$token) %>% as.numeric(),
-      isstop = stopword_check(.data$token) %>% as.numeric(),
-      phon = phonics::refinedSoundex(
-        stringr::str_replace(.data$token, "([a-z]{2,})(s)$", "\\1"),
-        mcl,
-        clean = FALSE
-      )
+  if (is.null(precalc_tokens)) {
+    cands <- pndf %>%
+      precalculate_pndf_tokens(ngram_max = ngram_max)
+  } else {
+    cands <- pndf %>% dplyr::left_join(precalc_tokens, dplyr::join_by(id),
+                                relationship = "many-to-many")
+  }
+
+  if (NROW(cands) == 0) {
+    return(make_candidate_df())
+  }
+
+  candidates <- target %>%
+    dplyr::inner_join(cands, dplyr::join_by(phon),
+      suffix = c("_target", "_cand"),
+      relationship = "many-to-many"
     )
 
-  # place_name_list unigrams
-
-  pndf_unigram_phon <- pndf %>%
-    tidytext::unnest_tokens(.data$token, .data$name, "words") %>%
-    dplyr::left_join(pndf_phon_map, join_by(token)) %>%
-    dplyr::mutate(
-      n = 1,
-      nword = as.numeric(word_check(.data$token)),
-      nstop = as.numeric(stopword_check(.data$token))
-    ) %>%
-    dplyr::select(
-      id,
-      token,
-      phon,
-      n,
-      nword,
-      nstop
-    )
-
-  # place_name_list phonetic match strings
-
-  pndf_phon <- pndf_unigram_phon %>%
-    dplyr::group_by(.data$id) %>%
-    dplyr::summarize(phon = paste0(.data$phon, collapse = " ")) %>%
-    dplyr::ungroup()
-
-  # create a table of uni-tri grams for the place_name_list
-
-  pndf_bigram_token <- pndf %>%
-    tidytext::unnest_tokens(token, name, "ngrams", n = 2, to_lower = TRUE) %>%
-    dplyr::mutate(col = stringr::str_split(.data$token, " ")) %>%
-    tidyr::unnest(col) %>%
-    dplyr::left_join(pndf_phon_map, join_by(col == token)) %>%
-    dplyr::group_by(.data$id, .data$token) %>%
-    dplyr::filter(!is.na(.data$token)) %>%
-    dplyr::summarize(
-      phon = paste0(.data$phon, collapse = " "),
-      nword = sum(.data$isword),
-      nstop = sum(.data$isstop),
-      .groups = "drop_last"
-    ) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(n = 2)
-
-  pndf_trigram_token <- pndf %>%
-    tidytext::unnest_tokens(.data$token, .data$name, "ngrams", n = 3, to_lower = TRUE) %>%
-    dplyr::mutate(col = stringr::str_split(token, " ")) %>%
-    tidyr::unnest(col) %>%
-    dplyr::left_join(pndf_phon_map, join_by(col == token)) %>%
-    dplyr::group_by(.data$id, .data$token) %>%
-    dplyr::filter(!is.na(.data$token)) %>%
-    dplyr::summarize(
-      phon = paste0(.data$phon, collapse = " "),
-      nword = sum(.data$isword),
-      nstop = sum(.data$isstop),
-      .groups = "drop_last"
-    ) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(n = 3)
-
-  pndf_phon_ngrams <- dplyr::bind_rows(pndf_unigram_phon, pndf_bigram_token, pndf_trigram_token)
-
-
-  candidates <- x_phon_ngrams %>%
-    dplyr::inner_join(pndf_phon_ngrams, join_by(phon), suffix = c("_x", "_cand")) %>%
-    dplyr::left_join(
-      pndf %>% dplyr::select(id, name) %>% dplyr::rename(name_cand = name),
-      join_by(id)
-    )
+  if (NROW(candidates) == 0) {
+    return(make_candidate_df())
+  }
 
   candidates <- candidates %>%
     dplyr::mutate(
       len_cand = purrr::map_dbl(
-        .data$name_cand,
+        .data$name,
         ~ stringr::str_extract_all(.x, " ") %>%
           unlist() %>%
           NROW()
@@ -219,18 +113,23 @@ match_place <- function(x, pndf, mcl = 10) {
     ) %>%
     dplyr::mutate(len_cand = .data$len_cand + 1) %>%
     dplyr::mutate(
-      pc_match = .data$n_x / (.data$len_cand),
-      token_match = .data$token_x == .data$token_cand,
-      plural_match = stringr::str_replace(.data$token_x, "([a-z]{2,})(s)$", "\\1") == stringr::str_replace(.data$token_cand, "([a-z]{2,})(s)$", "\\1"),
-      n_string = n_string
+      pc_match_cand = .data$n_target / (.data$len_cand),
+      # token_match = purrr::map2_int(.data$token_target, .data$token_cand,
+      #   ~sum(str_split(.x, " ", simplify = TRUE) == str_split(.x, " ", simplify = TRUE))),
+      # token_match = .data$token_match / n_cand,
+      plural_match = stringr::str_replace(.data$token_target, "([a-z]{2,})(s)$", "\\1") == stringr::str_replace(.data$token_cand, "([a-z]{2,})(s)$", "\\1"),
+      pc_match_target = .data$len_cand / .data$len_target,
+      tmp1 = token_target %>% stringr::str_replace_all("\\d", " ") %>% stringr::str_squish() %>% stringr::str_split(pattern = " "),
+      tmp2 = token_cand %>% stringr::str_replace_all("\\d", " ") %>% stringr::str_squish() %>% stringr::str_split(pattern = " "),
+      token_match = purrr::map2_int(tmp1, tmp2, ~ NROW(which((.x) == (.y)))) / n_cand
     ) %>%
-    dplyr::filter(!((.data$n_cand == .data$nword) &
-      .data$nword == 1)) %>%
-    dplyr::filter(!(.data$nstop == 1 &
-      .data$nword == .data$n_cand)) %>%
-    dplyr::filter(!(.data$n_cand == .data$nstop)) %>%
+    #select(-contains("tmp")) %>%
+    dplyr::filter(!((.data$n_cand == .data$nword_target) &
+      .data$nword_target == 1)) %>%
+    dplyr::filter(!(.data$nstop_target == 1 &
+      .data$nword_target == .data$n_cand)) %>%
+    dplyr::filter(!(.data$n_cand == .data$nstop_cand)) %>%
     dplyr::filter(!is.na(.data$id))
-
 
   return(candidates)
 }
@@ -252,13 +151,19 @@ select_candidate <- function(candidates,
                              pc_m = .5,
                              xy = c(531370, 180220),
                              reject_pcd = TRUE) {
+  # discard any candidates substantially longer than the target
+  #
+
+  candidates <- candidates %>%
+    dplyr::filter(!(.data$pc_match_target > 1.2))
+
   # discard single word dictionary matches
 
   candidates <- candidates %>%
-    dplyr::filter(!(.data$n_x == 1 & .data$isword == 1))
+    dplyr::filter(!(.data$n_target == 1 & .data$nword_target == 1))
 
   candidates <- candidates %>%
-    dplyr::filter(!(.data$n_x == 1 & !(.data$token_match | .data$plural_match)))
+    dplyr::filter(!(.data$n_target == 1 & !(.data$token_match | .data$plural_match)))
 
   if (NROW(candidates) == 0) {
     return(make_candidate_df())
@@ -268,8 +173,8 @@ select_candidate <- function(candidates,
   #
 
   candidates <- candidates %>%
-    dplyr::filter(!(.data$n_x == 1 &
-      nchar(.data$token_x) < 3 & !.data$token_match))
+    dplyr::filter(!(.data$n_target == 1 &
+      nchar(.data$token_target) < 3 & !.data$token_match))
 
   if (NROW(candidates) == 0) {
     return(make_candidate_df())
@@ -278,7 +183,7 @@ select_candidate <- function(candidates,
   # remove candidates substantially longer than the original text
 
   candidates <- candidates %>%
-    dplyr::filter(!(.data$len_cand > (n_string + 2)))
+    dplyr::filter(!(.data$len_cand > (len_target + 2)))
 
   if (NROW(candidates) == 0) {
     return(make_candidate_df())
@@ -298,7 +203,7 @@ select_candidate <- function(candidates,
   # discard any very short matches
 
   candidates <- candidates %>%
-    dplyr::filter(.data$pc_match >= pc_m)
+    dplyr::filter(.data$pc_match_cand >= pc_m)
 
   if (NROW(candidates) == 0) {
     return(make_candidate_df())
@@ -307,7 +212,7 @@ select_candidate <- function(candidates,
   #
 
   candidates <- candidates %>%
-    dplyr::filter(!(.data$n_x == .data$isword & !.data$token_match))
+    dplyr::filter(!(.data$n_target == .data$nword_target & !.data$token_match))
 
   if (NROW(candidates) == 0) {
     return(make_candidate_df())
@@ -320,8 +225,8 @@ select_candidate <- function(candidates,
 
   candidates <- candidates %>%
     dplyr::mutate(
-      perfect_match = (n_string == .data$len_cand &
-        .data$pc_match == 1) &
+      perfect_match = (len_target == .data$len_cand &
+        .data$pc_match_cand == 1) &
         (.data$token_match | .data$plural_match)
     )
 
@@ -348,25 +253,40 @@ select_candidate <- function(candidates,
 
   parent_pc <- candidates %>%
     dplyr::filter(.data$parent_child == "parent") %>%
-    dplyr::select(id, pc_match) %>%
-    dplyr::rename(pc_match_parent = pc_match)
+    dplyr::select(id, pc_match_cand) %>%
+    dplyr::rename(pc_match_parent = pc_match_cand)
 
   candidates <- candidates %>%
-    dplyr::left_join(parent_pc, join_by(id_parent == id)) %>%
-    dplyr::mutate(pc_match_parent = replace_na(.data$pc_match_parent, 0)) %>%
-    distinct()
+    dplyr::left_join(parent_pc, dplyr::join_by(id_parent == id)) %>%
+    dplyr::mutate(pc_match_parent = tidyr::replace_na(.data$pc_match_parent, 0)) %>%
+    dplyr::distinct()
 
   # keep those with a max pc match or a parent-child relationship
+  #
 
   candidates <- candidates %>%
     dplyr::filter(
-      pc_match == max(.$pc_match) |
+      pc_match_cand == max(.$pc_match_cand) |
+        pc_match_target == max(.$pc_match_target) |
         parent_child %in% c("parent", "child") |
-        pc_match == (
-          candidates %>% dplyr::filter(.data$n_x > 1) %>% dplyr::select(pc_match) %>% max0()
+        pc_match_cand == (
+          candidates %>% dplyr::filter(.data$n_target > 1) %>% dplyr::select(pc_match_cand) %>% max0()
         ) &
-          .data$n_x > 1
+          .data$n_target > 1
     )
+
+  # discard those where stopwords more than 50% of a match
+  #
+
+  candidates <- candidates %>%
+    dplyr::filter(!(nstop_target > (0.5 * n_target)))
+
+  # prefer the lowest frequency matches
+  #
+
+  #candidates <- candidates %>% dplyr::slice_min(order_by = f_min, n=3)
+
+  candidates %>% dplyr::arrange(token_match, dplyr::desc(f_min)) %>% dplyr::slice_head(n = 5)
 
   # keep the longest and the token matches and plural matches
 
@@ -375,15 +295,15 @@ select_candidate <- function(candidates,
       .data$token_match | .data$plural_match)
 
   # reject parents with a child present
+  # THIS IS TOO SIMPLISTIC
 
-  candidates <- candidates %>% dplyr::filter(.data$parent_child != "parent")
+  #candidates <- candidates %>% dplyr::filter(.data$parent_child != "parent")
 
   # if there are candidates that are 100% matches at this stage keep them
   # or keep orgs that are left
 
-  candidates <- candidates %>% dplyr::filter(.data$pc_match == max(.$pc_match) |
+  candidates <- candidates %>% dplyr::filter(.data$pc_match_cand == max(.$pc_match_cand) |
     .data$class %in% c("org", "street"))
-
 
   # if there are token matches then only keep those
 
@@ -392,7 +312,8 @@ select_candidate <- function(candidates,
       .data$plural_match == max(.$plural_match)
   )
 
-  # if there are streets and towns left prefer the streets
+  # if there are streets and towns left prefer the streets providing they have as
+  # high a match as any towns
   #
 
   if (any(
@@ -405,7 +326,11 @@ select_candidate <- function(candidates,
       "country"
     )
   ) & any(candidates$class == "street")) {
-    cand <- candidates %>% dplyr::filter(.data$class %in% c("street", "org"))
+
+    max_pc_ladplus <- candidates %>% dplyr::filter(!(.data$class %in% c("street", "org"))) %>%
+      dplyr::select(pc_match_cand) %>% max() %>% unlist()
+
+    cand <- candidates %>% dplyr::filter(.data$class %in% c("street", "org"), pc_match_cand == max_pc_ladplus)
 
     if (NROW(cand) > 0) {
       candidates <- cand
@@ -421,56 +346,63 @@ select_candidate <- function(candidates,
   #
 
   candidates <- candidates %>%
-    group_by(id) %>%
-    summarize(
-      token_x = head(token_x, 1),
+    dplyr::group_by(id) %>%
+    dplyr::summarize(
+      token_target = head(token_target, 1),
       phon = head(phon, 1),
-      n_x = max(n_x),
-      isword = max(isword),
-      isstop = max(isstop),
+      n_target = max(n_target),
+      nword_target = max(nword_target),
+      nstop_target = max(nstop_target),
       token_cand = head(token_cand, 1),
       n_cand = max(n_cand),
-      nstop = max(nstop),
-      name_cand = head(name_cand, 1),
+      nword_cand = max(nword_cand),
+      nstop_cand = max(nstop_cand),
+      name = head(name, 1),
       len_cand = max(len_cand, 1),
-      pc_match = max(pc_match, 1),
+      pc_match_cand = max(pc_match_cand, 1),
+      pc_match_target = max(pc_match_target, 1),
       token_match = max(token_match) == 1,
       plural_match = max(plural_match) == 1,
-      n_string = max(n_string),
+      len_target = max(len_target),
       name = head(name, 1),
       easting = max(easting),
       northing = max(northing),
       class = head(class, 1),
-      proximity = min(proximity)
+      proximity = min(proximity),
+      f_min = min(f_min)
     ) %>%
-    ungroup()
+    dplyr::ungroup()
 
   # if all candidates have the SAME NAME take the nearest
   #
 
-  if (NROW(candidates %>% distinct(name)) == 1) {
-
-    candidates <- candidates %>% slice_min(n = 1, order_by = proximity)
+  if (NROW(candidates %>% dplyr::distinct(name)) == 1) {
+    candidates <- candidates %>% dplyr::slice_min(n = 1, order_by = proximity)
 
     candidates <- candidates %>%
       dplyr::slice_max(
         tibble::tibble(
-          pc_match,
-          desc(class),
-          n_x,
-          token_match,
+          pc_match_cand,
+          dplyr::desc(class),
+          n_target,
+          dplyr::desc(token_match),
           plural_match,
-          desc(proximity)
+          dplyr::desc(proximity)
         ),
         n = 2
       )
+  }
 
+  # if there is n_cand == 1 and n_target == 1 but len_cand > 1 then remove >1
+
+  if (all(candidates$n_cand == 1) & all(candidates$n_target == 1)) {
+    candidates <- candidates %>% dplyr::filter(.data$len_cand == 1)
   }
 
   # if there is a pc_100 match take the longest
 
-  if (all(candidates$pc_match == 1)) {
-    candidates <- candidates %>% dplyr::filter(.data$n_x == max(.$n_x))
+  if (all(candidates$pc_match_cand == 1)) {
+    candidates <- candidates %>% dplyr::filter(.data$n_target == max(.$n_target))
   }
 
   # area covered by candidates
@@ -480,11 +412,11 @@ select_candidate <- function(candidates,
 
   if (NROW(candidates) < 3) {
     candidates <- candidates %>%
-      add_row(
+      tibble::add_row(
         easting = candidates$easting[1] + 50,
         northing = candidates$northing[1] + 50
       ) %>%
-      add_row(
+      tibble::add_row(
         easting = candidates$easting[1] - 50,
         northing = candidates$northing[1] - 50
       )
@@ -492,8 +424,8 @@ select_candidate <- function(candidates,
 
   area <- candidates %>%
     dplyr::mutate(
-      easting = replace_na(.data$easting, 0),
-      northing = replace_na(.data$northing, 0)
+      easting = tidyr::replace_na(.data$easting, 0),
+      northing = tidyr::replace_na(.data$northing, 0)
     ) %>%
     sf::st_as_sf(coords = c("easting", "northing")) %>%
     sf::st_union() %>%
@@ -522,7 +454,7 @@ select_candidate <- function(candidates,
     }
   }
 
-  candidates <- filter(candidates, !is.na(id))
+  candidates <- dplyr::filter(candidates, !is.na(id))
 
   return(candidates)
 }
@@ -535,9 +467,39 @@ select_candidate <- function(candidates,
 #' @export
 
 make_candidate_df <- function() {
-  candidates <- tibble::tibble(id = character(0), pc_match = double(0), proximity = double(0))
+  candidates <- tibble::tibble(id = character(0), pc_match_cand = double(0), proximity = double(0))
 
   return(candidates)
+}
+
+#' determines whether or not an assault location description should be coded
+#' to the individuals home address - uses a very simple process of matching a
+#' few key phrases without relying on any externally trained model
+#'
+#' @param txt data frame with a column containing the text to be assessed
+#' @param col name of the column containing text to be assessed
+#'
+#' @returns vector of the same length as txt containing "home" or "other"
+#'
+#' @export
+
+assign_home_simple <- function(txt, col = ald_clean) {
+
+  home_phrases <- c("^home$",
+                    "^.{0,10}[^\\s]home[$\\s].{0,10}$",
+                    "(patient['s]{1,2}\\s*|own)\\s(home|house|residence|flat|appartment|address)(\\s|$)",
+                    "home address",
+                    "at home")
+
+  txt <- txt %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(home_flag = purrr::map_lgl(home_phrases,
+                                      ~stringr::str_detect({{col}}, .x)) %>%
+                                        any(na.rm = TRUE) %>%
+                    dplyr::if_else("home", "other"))
+
+  return(txt)
+
 }
 
 #' determines whether or not an assault location description should be coded
@@ -550,35 +512,38 @@ make_candidate_df <- function() {
 #'
 #' @export
 
-assign_home <- function(txt, col = ald_clean) {
+assign_home <- function(txt, col = ald_clean,
+                        w2v_file = "w2v_model_cbow_8_300.bin") {
+
   # w2v model
   #
 
-  w2v <- fs::path_package("extdata/w2v_model_cbow_8_300.bin", package = "istv") %>%
+  w2v <- w2v_file %>%
     word2vec::read.word2vec()
 
   # document vectors and predictions based on those vectors
 
-  txt <- txt %>% dplyr::mutate(eid = dplyr::row_number())
-
   doc_vecs <- txt %>%
-    dplyr::select(eid, ald_clean) %>%
-    dplyr::rename(doc_id = eid, text = ald_clean) %>%
+    dplyr::mutate(doc_id = dplyr::row_number(),
+                  ald_clean = dplyr::if_else(ald_clean == "" | is.na(ald_clean), "no text", ald_clean)) %>%
+    dplyr::rename(text = ald_clean) %>%
+    dplyr::select(doc_id, text) %>%
     word2vec::doc2vec(object = w2v) %>%
-    tibble::as_tibble(rownames = "eid", .name_repair == "universal") %>%
-    dplyr::filter(!is.na(.data$V1), .data$V1 != "")
+    tibble::as_tibble(rownames = "doc_id", .name_repair == "check_unique") %>%
+    dplyr::rename(eid = doc_id) %>%
+    dplyr::mutate(across(where(is.numeric), ~as.numeric(.x))) %>%
+    dplyr::mutate(across(where(is.numeric), ~dplyr::if_else(is.na(.x), 0, .x)))
 
   prediction_home <-
-    tibble::tibble(
-      id = doc_vecs$eid,
-      home_flag = predict(istv::docs_fit, new_data = doc_vecs) %>% unlist()
-    ) %>%
-    dplyr::mutate(id = as.numeric(.data$id))
-
-  prediction_home <- txt %>%
-    dplyr::left_join(prediction_home, join_by(eid == id)) %>%
+     tibble::tibble(
+       id = rownames(doc_vecs),
+       home_flag = brulee:::predict.brulee_logistic_reg(docs_fit, new_data = doc_vecs) %>% unlist()
+     ) %>%
+     dplyr::mutate(id = as.numeric(.data$id)) %>%
+    dplyr::mutate(home_flag = tidyr::replace_na(home_flag, "other")) %>%
     dplyr::select(home_flag) %>%
     unlist()
+
 
   return(prediction_home)
 }
@@ -587,6 +552,7 @@ assign_home <- function(txt, col = ald_clean) {
 #'
 #' @param txt data frame containing columns site_code, assault_location_description plus anything else that is useful
 #' @param pndf data frame with columns id, name, easting, northing, class, fulladdress, LSOA21CD, if NULL uses the package default
+#' @param precalc_tokens data frame with precalculated tokens and phonetic encouding for the pndf
 #' @param site_xy data frame with site_code, easting northing of the hospital sites, if NULL uses the package default
 #' @param debug boolean, if TRUE the output is much more voluminous and can be used to troubleshoot matching issues
 #' @param home_fn function to be used to assign home, returns vector of "home"/"other" values
@@ -609,32 +575,49 @@ assign_home <- function(txt, col = ald_clean) {
 
 geocode_text <- function(txt,
                          pndf = NULL,
+                         precalc_tokens = NULL,
                          site_xy = NULL,
-                         home_fn = assign_home,
-                         debug = FALSE) {
-  if (is_null(site_xy)) {
+                         home_fn = NULL,
+                         modify_words = NULL,
+                         debug = FALSE,
+                         ... #named arguments to be passed to home_fn
+                         ) {
+  if (rlang::is_null(site_xy)) {
     site_xy <- istv::site_xy %>% dplyr::select(site_code, easting, northing)
   }
 
-  if (is_null(pndf)) {
+  if (rlang::is_null(pndf)) {
     pndf <- istv::pndf
+  }
+
+  if (rlang::is_null(precalc_tokens)) {
+    precalc_tokens <- istv::precalc_tokens
+  }
+
+  if (rlang::is_null(home_fn)) {
+    home_fn <- istv::assign_home
+  }
+
+  if (rlang::is_null(modify_words)) {
+    modify_words <- istv::place_names
   }
 
   message("Adding site xy")
 
   txt <- txt %>%
-    dplyr::left_join(site_xy, join_by(site_code))
+    dplyr::left_join(site_xy, dplyr::join_by(site_code))
 
   # cleaned text
 
   message("Cleaning text")
 
-  txt <- clean_text(txt)
+  txt <- clean_text(txt) %>%
+    mutate(ald_clean = replace_na(ald_clean, "ZZZ no text"))
 
   # assign home
 
   txt <- txt %>%
-    dplyr::mutate(home_flag = home_fn(txt))
+    dplyr::mutate(home_flag = home_fn(txt, ...))
 
   # now extract postcodes
   #
@@ -646,12 +629,11 @@ geocode_text <- function(txt,
   message("Detecting outcode")
 
   outcodes <- pndf %>%
-    dplyr::filter(.data$class == "pcd") %>%
-    dplyr::distinct(.data$name) %>%
+    dplyr::distinct(.data$pcd) %>%
     unlist(use.names = FALSE)
 
-  outcodes <-
-    paste0("(^|\\s|\\p{Punct})+(", outcodes, ")(\\s|$||\\p{Punct})+")
+  # outcodes <-
+  #   paste0("(^|\\s|\\p{Punct})+(", outcodes, ")(\\s|$||\\p{Punct})+")
 
   txt <- txt %>%
     dplyr::mutate(contains_outcode = purrr::map_lgl(
@@ -671,11 +653,10 @@ geocode_text <- function(txt,
   # (e.g.) "the incident happened at 10 past 5" pulling t10
   #
 
-  message("Extracting outcode")
 
   txt <- txt %>%
     dplyr::mutate(
-      outcode = map2_chr(
+      outcode = purrr::map2_chr(
         .data$ald_clean,
         .data$contains_outcode,
         ~ extract_outcode(.x, outcodes, .y),
@@ -687,7 +668,7 @@ geocode_text <- function(txt,
 
   txt <- txt %>%
     dplyr::mutate(
-      postcode = map2_chr(
+      postcode = purrr::map2_chr(
         .data$ald_clean,
         .data$outcode,
         ~ extract_whole_postcode(.x, .y),
@@ -696,7 +677,7 @@ geocode_text <- function(txt,
     )
 
   txt <- txt %>%
-    dplyr::mutate(pc2 = map2_chr(
+    dplyr::mutate(pc2 = purrr::map2_chr(
       .data$ald_clean,
       .data$outcode,
       ~ extract_whole_postcode(.x, .y, sector = TRUE),
@@ -711,8 +692,6 @@ geocode_text <- function(txt,
   # look for candidates close to the
   #
 
-
-
   pb <- utils::txtProgressBar(
     min = 0,
     max = NROW(txt),
@@ -723,12 +702,14 @@ geocode_text <- function(txt,
   for (i in 1:NROW(txt)) {
     if (debug) message("line ", i, " of ", NROW(txt), "\n")
 
-    candidates <- make_candidate_df()
+    candidates <- cand <- town_candidates <- make_candidate_df()
+
 
     if (!is.na(txt$outcode[i])) {
+
       pf <- pndf %>% dplyr::filter(.data$pcd == txt$outcode[i])
 
-      cand <- match_place(txt$ald_clean[i], pf)
+      cand <- match_place(txt$ald_clean[i], pf, precalc_tokens = precalc_tokens, modify_words = modify_words)
 
       if (NROW(cand) > 0) {
         candidates <- dplyr::bind_rows(candidates, cand)
@@ -736,18 +717,58 @@ geocode_text <- function(txt,
     }
 
     if (NROW(candidates) == 0) {
+
+      # firstly find out if there is a location name in the string
+      #
+
+      town_candidates <- make_candidate_df()
+
+      pf_town <- istv::pndf %>%
+        dplyr::filter(class %in% c("town", "LAD")) %>%
+        filter_pndf(x = txt$easting[i], y=txt$northing[i], r=25e3)
+
+      if (NROW(pf_town) > 0) {
+
+      placename <- match_place(txt$ald_clean[i],
+                               pndf = pf_town,
+                               precalc_tokens = istv::precalc_tokens,
+                               modify_words = modify_words)
+
+        if (NROW(placename) > 0) {
+
+        pf <- purrr::pmap(placename %>% dplyr::select(easting, northing), function(easting, northing) {filter_pndf(easting, northing, r = 2e3)}) %>%
+          dplyr::bind_rows() %>%
+          dplyr::filter(!(name %in% placename$name))
+
+        cand <- match_place(txt$ald_clean[i], pf, precalc_tokens = precalc_tokens,
+                            modify_words = modify_words)
+
+          if (NROW(cand) > 0) {
+            cand <- cand %>%
+              dplyr::distinct() %>%
+              select_candidate(xy = c(placename$easting[1], placename$northing[1], r = 10e3), reject_pcd = TRUE)
+            town_candidates <- dplyr::bind_rows(town_candidates, cand)
+          }
+
+        }
+
+      }
+
       pf <- filter_pndf(txt$easting[i], txt$northing[i], r = 10e3, pndf)
-      cand <- match_place(txt$ald_clean[i], pf)
+
+      cand <- match_place(txt$ald_clean[i], pf, precalc_tokens = precalc_tokens,
+                          modify_words = modify_words)
 
       if (NROW(cand) > 0) {
         candidates <- dplyr::bind_rows(candidates, cand)
       }
-      # go wider, local at local villages & town centres nearby (within 50km)
+      # go wider, local at local villages & town centres nearby (within 100km)
 
-      pf <- filter_pndf(txt$easting[i], txt$northing[i], r = 50e3, pndf) %>%
+      pf <- filter_pndf(txt$easting[i], txt$northing[i], r = 100e3, pndf) %>%
         dplyr::filter(.data$class %in% c("locality", "populatedplace"))
 
-      cand <- match_place(txt$ald_clean[i], pf)
+      cand <- match_place(txt$ald_clean[i], pf, precalc_tokens = precalc_tokens,
+                          modify_words = modify_words)
 
       if (NROW(cand) > 0) {
         candidates <- dplyr::bind_rows(candidates, cand)
@@ -757,7 +778,8 @@ geocode_text <- function(txt,
       pf <- pndf %>%
         dplyr::filter(.data$class %in% c("town", "country", "lad"))
 
-      cand <- match_place(txt$ald_clean[i], pf)
+      cand <- match_place(txt$ald_clean[i], pf, precalc_tokens = precalc_tokens,
+                          modify_words = modify_words)
 
       if (NROW(cand) > 0) {
         candidates <- dplyr::bind_rows(candidates, cand)
@@ -766,13 +788,22 @@ geocode_text <- function(txt,
 
     if (NROW(candidates) > 0) {
       candidates <- candidates %>%
-        dplyr::left_join(istv::pndf, by = join_by(id)) %>%
         dplyr::distinct() %>%
         select_candidate(xy = c(txt$easting[i], txt$northing[i]))
     }
 
+    # if the pc_match on the town candidate is the same as or greater than
+    # pc match on the proximal candidate then use town candidates
+
+    if (exists("town_candidates") & NROW(candidates) > 0) {
+
+    if (max0(town_candidates$pc_match_cand) >= max0(candidates$pc_match_cand)) {
+      candidates <- town_candidates
+
+    }}
+
     if (NROW(candidates) == 0) {
-      candidates <- make_candidate_df() %>% add_row()
+      candidates <- make_candidate_df() %>% tibble::add_row()
     }
 
     txt$candidates[[i]] <- candidates
@@ -781,8 +812,10 @@ geocode_text <- function(txt,
   close(pb)
 
   # final selection
+  # if home & postcode >
+  # if home & postcode sector >
   # home >
-  # postcode >
+  # if not home & postcode
   # postcode sector >
   # unambiguous match >
   # postcode district >
@@ -797,19 +830,23 @@ geocode_text <- function(txt,
         NROW()),
       top_cand = purrr::map_chr(
         .data$candidates,
-        ~ .x %>%
-          dplyr::select(id) %>%
+        ~ .x  %>%
+          dplyr::slice_max(n = 1, order_by = pc_match_cand) %>%
           dplyr::slice_head(n = 1) %>%
+          dplyr::select(id) %>%
           unlist(use.names = FALSE)
       ),
       match = purrr::map_dbl(
         .data$candidates,
         ~ .x %>%
-          dplyr::select(pc_match) %>%
+          dplyr::slice_max(n = 1, order_by = pc_match_cand) %>%
           dplyr::slice_head(n = 1) %>%
+          dplyr::select(pc_match_cand) %>%
           unlist(use.names = FALSE)
       ),
       selected_id = dplyr::case_when(
+        home_flag == "home" & !is.na(.data$postcode) ~ stringr::str_to_upper(.data$postcode),
+        home_flag == "home" &!is.na(.data$pc2) ~ paste0("pc2_", stringr::str_to_upper(.data$pc2)),
         home_flag == "home" ~ "home",
         !is.na(.data$postcode) ~ stringr::str_to_upper(.data$postcode),
         !is.na(.data$pc2) ~ paste0("pc2_", stringr::str_to_upper(.data$pc2)),
@@ -828,12 +865,14 @@ geocode_text <- function(txt,
         class,
         LSOA21CD
       ),
-      join_by(selected_id == id)
+      dplyr::join_by(selected_id == id)
     ) %>%
-    mutate(LSOA21CD = case_when(selected_id == "home" ~ "home",
-                                class == "country" ~ name,
-                                is.na(LSOA21CD) ~ NA_character_,
-                                TRUE ~ LSOA21CD))
+    dplyr::mutate(LSOA21CD = dplyr::case_when(
+      selected_id == "home" ~ "home",
+      class == "country" ~ name,
+      is.na(LSOA21CD) ~ NA_character_,
+      TRUE ~ LSOA21CD
+    ))
 
   if (!debug) {
     txt <- txt %>%

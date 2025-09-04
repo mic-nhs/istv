@@ -1,41 +1,39 @@
-#'
-#' @import hunspell
-#' @import phonics
-#' @import sf
-#' @import tidytext
-#' @import dplyr
-#' @import stringr
-#' @import fs
-#' @import purrr
-#' @import readr
-#' @import tibble
-#' @import tidyr
-#' @import usethis
-#' @import word2vec
-#' @import utils
-#' @import workflows
-#' @import parsnip
-#'
+#
+# @import hunspell
+# @import phonics
+# @import sf
+# @import tidytext
+# @import dplyr
+# @import stringr
+# @import fs
+# @import purrr
+# @import readr
+# @import tibble
+# @import tidyr
+# @import usethis
+# @import word2vec
+# @import workflows
+# @import brulee
+# @import parsnip
+# @import runner
 
-usethis::use_package("hunspell")
-usethis::use_package("phonics")
-usethis::use_package("sf")
-usethis::use_package("tidytext")
-usethis::use_package("dplyr")
-usethis::use_package("stringr")
-usethis::use_package("fs")
-usethis::use_package("purrr")
-usethis::use_package("readr")
-usethis::use_package("tibble")
-usethis::use_package("tidyr")
-usethis::use_package("usethis")
-usethis::use_package("word2vec")
-usethis::use_package("utils")
-usethis::use_package("workflows")
-usethis::use_package("parsnip")
+usethis::use_package("hunspell", type = "Imports")
+usethis::use_package("phonics", type = "Imports")
+usethis::use_package("sf", type = "Imports")
+usethis::use_package("tidytext", type = "Imports")
+usethis::use_package("dplyr", type = "Imports")
+usethis::use_package("fs", type = "Imports")
+usethis::use_package("tidyr", type = "Imports")
+usethis::use_package("readr", type = "Imports")
+usethis::use_package("usethis", type = "Imports")
+usethis::use_package("word2vec", type = "Imports")
+usethis::use_package("utils", type = "Imports")
+usethis::use_package("hardhat", type = "Imports")
+usethis::use_package("brulee", type = "Imports")
+usethis::use_package("runner", type = "Imports")
 
 usethis::use_gpl_license()
 usethis::use_pipe()
-#usethis::use_build_ignore(c("dev/.*"))
+usethis::use_build_ignore(c("dev/.*", "data-raw/.*"))
 
-# usethis::use_author(given = "Michael", family = "Cheetham", email = "michael.cheetham@nhs.net")
+#usethis::use_author(given = "Michael", family = "Cheetham", email = "michael.cheetham@nhs.net")

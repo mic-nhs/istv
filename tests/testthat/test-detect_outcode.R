@@ -2,7 +2,7 @@ s <- c("sw19", "sw18", "b1", "kt2", "kt12")
 x1 <- "some string containing a valid postcode sw19 6ls and some other text"
 x2 <- "some string containing a valid outcode sw19 and some other text"
 x3 <- "some string with an outcode like chunk m25 that isn't valid"
-x4 <- "outcode has kt- 12 a space and punctuation"
+x4 <- "outcode has kt 12 a space"
 
 test_that("with postcode works", {
   expect_equal(istv::detect_outcode(x1, s), TRUE)

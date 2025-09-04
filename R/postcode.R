@@ -31,13 +31,13 @@ detect_outcode <- function(x, s) {
   } else {
     if (stringr::str_detect(x, "[a-zA-Z]{1,2}[\\s\\p{Punct}]{0,}[0-9]{1,2}")) {
 
-      x_clean <- stringr::str_extract(x, "([a-zA-Z]{1,2})([\\s\\p{Punct}]{0,})([0-9]{1,2})", group = c(1, 3)) %>%
-        paste0(collapse = "")
-      lgl <- purrr::map_lgl(stringr::regex(s),
-                            stringr::str_detect,
-                            string = stringr::str_to_lower(x_clean)
-      ) %>%
-        any(na.rm = TRUE)
+      x_clean <- stringr::str_extract_all(x, "([a-zA-Z]{1,2})([\\s\\p{Punct}]{0,})([0-9]{1,2})") %>%
+        purrr::map(~str_replace(.x, "\\s", "")) %>%
+        unlist() %>%
+        stringr::str_to_lower()
+
+      lgl <- any(x_clean %in% s, na.rm = TRUE)
+
     } else {
       lgl <- FALSE
     }
@@ -123,7 +123,7 @@ extract_whole_postcode <- function(x, outcode, sector = FALSE) {
   if (is.na(outcode)) {
     whole_postcode <- NA_character_
   } else {
-    whole_postcode <- stringr::str_replace_all(x, "\\s", "") %>%
+    whole_postcode <- stringr::str_replace_all(x, "[[:punct:]\\s]", "") %>%
       stringr::str_to_upper()
 
     if (sector) {

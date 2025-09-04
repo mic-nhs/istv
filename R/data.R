@@ -27,6 +27,21 @@
 #' @source <https://www.odsdatasearchandexport.nhs.uk/>
 "pndf"
 
+#' place name tokens dataframe
+#'
+#' @format ## `precalc_tokens`
+#' A data frame with ... rows and 6 columns:
+#' \describe{
+#'   \item{name}{id matching to pndf}
+#'   \item{token}{word or ngram}
+#'   \item{phon}{phonetic encoding of the token}
+#'   \item{n}{ngram of the token}
+#'   \item{nstop}{number of stopwords in the token}
+#'   \item{nword}{number of dictionary words in the token}
+#' }
+#' @source <https://www.odsdatasearchandexport.nhs.uk/>
+"precalc_tokens"
+
 #' Common abbreviations to be substituted
 #'
 #' @format ## `abbreviations`
@@ -49,12 +64,6 @@
 #' }
 #' @source <https://www.data.gov.uk/dataset/0b412b57-6934-4f28-b495-640cdc7e8f7f/foreign-commonwealth-and-development-office-geographical-names-index/datafile/f9835358-6435-41da-803c-f7917db7fdad/preview>
 "countries"
-
-#' model for assigning home locations
-#'
-#' @format ## `docs_fit`
-#' A data frame with ... rows and 6 columns:
-"docs_fit"
 
 #' headers of openname file from ODS
 #'

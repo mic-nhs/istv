@@ -2,6 +2,8 @@
 #'
 #' @param x1,y1,x2,y2 xy coordinates of the two points (normally 6 digit BNG)
 #' @returns distance in coordinate units (normally m)
+#'
+#' @export
 
 euclidean_dist <- function(x1, y1, x2, y2) {
   r <- sqrt((x1 - x2)^2 +
@@ -15,6 +17,8 @@ euclidean_dist <- function(x1, y1, x2, y2) {
 #'
 #' @param x a numeric vector
 #' @returns numeric
+#'
+#' @export
 
 max0 <- function(x) {
   if (NROW(x) == 0) {
