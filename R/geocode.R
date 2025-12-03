@@ -230,7 +230,7 @@ select_candidate <- function(candidates,
         (.data$token_match | .data$plural_match)
     )
 
-  if (any(candidates$perfect_match)) {
+  if (any(candidates$perfect_match, na.rm = TRUE)) {
     candidates <- candidates %>% dplyr::filter(.data$perfect_match)
   }
 
@@ -324,8 +324,8 @@ select_candidate <- function(candidates,
       "town",
       "landform",
       "country"
-    )
-  ) & any(candidates$class == "street")) {
+    ), na.rm = TRUE
+  ) & any(candidates$class == "street", na.rm = TRUE)) {
 
     max_pc_ladplus <- candidates %>% dplyr::filter(!(.data$class %in% c("street", "org"))) %>%
       dplyr::select(pc_match_cand) %>% max() %>% unlist()

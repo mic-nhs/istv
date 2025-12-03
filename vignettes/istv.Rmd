@@ -255,6 +255,8 @@ Figure 1 shows the effect on the raw distribution of assaults and Figure 2 shows
 
 ```{r setup}
 
+library(tidyverse)
+
 txt <- tibble::tibble(site_code = c("R1H12", "RJ701", "RKEQ4"), 
               attendance_dt = lubridate::as_datetime("2025-01-01 08:00:00"),
               injury_dt = lubridate::as_datetime("2025-01-01 07:00:00"),
@@ -262,7 +264,7 @@ txt <- tibble::tibble(site_code = c("R1H12", "RJ701", "RKEQ4"),
               injury_mechanism = c("Blunt force","Sharp object","Asphyxiation"),
               assault_location_description = c("Tower hamlets mission", "Nandos in wimbledon", "Holloway Road"))
 
-g <- istv::geocode_text(txt)
+g <- istv::geocode_text(txt, w2v_file = "C:/projects/istv_data_new/data-static/models/w2v_model_cbow_8_300.bin" )
 
 print(g)
 
