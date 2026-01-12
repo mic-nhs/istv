@@ -10,7 +10,9 @@ geocode_text(
   precalc_tokens = NULL,
   site_xy = NULL,
   home_fn = NULL,
-  debug = FALSE
+  modify_words = NULL,
+  debug = FALSE,
+  ...
 )
 }
 \arguments{

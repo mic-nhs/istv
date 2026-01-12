@@ -5,7 +5,14 @@
 \title{match x against the closest match in a place name data frame with columns
 id and name}
 \usage{
-match_place(x, pndf, mcl = 10, precalc_tokens = NULL, ngram_max = 3)
+match_place(
+  x,
+  pndf,
+  mcl = 10,
+  precalc_tokens = NULL,
+  ngram_max = 3,
+  modify_words = NULL
+)
 }
 \arguments{
 \item{x}{character a short sentence such as that recorded in the assault

@@ -5,7 +5,7 @@
 \title{returns all unigrams to ngram_max tokens from a given phrase plus their
 phonetic encoding and some statistics}
 \usage{
-allgrams_tibble(x, ngram_max = 2, mcl = 10)
+allgrams_tibble(x, ngram_max = 3, mcl = 10, modify_words = NULL)
 }
 \arguments{
 \item{x}{character phrase to be encoded}

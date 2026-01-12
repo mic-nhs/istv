@@ -5,7 +5,7 @@
 \title{a windowing function that sweeps through a unigram tibble and
 extracts ngrams}
 \usage{
-ngram_tibble(x, ngram = 2)
+ngram_tibble(x, ngram = 2, modify_words = NULL)
 }
 \arguments{
 \item{x}{data frame the unigram tibble}

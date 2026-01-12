@@ -5,7 +5,7 @@
 \title{determines whether or not an assault location description should be coded
 to the individuals home address}
 \usage{
-assign_home(txt, col = ald_clean)
+assign_home(txt, col = ald_clean, w2v_file = "w2v_model_cbow_8_300.bin")
 }
 \arguments{
 \item{txt}{data frame with a column containing the text to be assessed}

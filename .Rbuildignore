@@ -5,3 +5,5 @@ dev/.*
 ^data-raw$
 ^dev/\.*$
 ^data-raw/\.*$
+^doc$
+^Meta$
