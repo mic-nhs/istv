@@ -402,7 +402,10 @@ select_candidate <- function(candidates,
   # if there is a pc_100 match take the longest
 
   if (all(candidates$pc_match_cand == 1)) {
-    candidates <- candidates %>% dplyr::filter(.data$n_target == max(.$n_target))
+    #TODO: fix this
+    suppressWarnings({
+      candidates <- candidates %>% dplyr::filter(.data$n_target == max(.$n_target))
+    })
   }
 
   # area covered by candidates
@@ -529,7 +532,8 @@ assign_home <- function(txt, col = ald_clean,
     dplyr::rename(text = ald_clean) %>%
     dplyr::select(doc_id, text) %>%
     word2vec::doc2vec(object = w2v) %>%
-    tibble::as_tibble(rownames = "doc_id", .name_repair == "check_unique") %>%
+    magrittr::set_colnames(paste0("V", 1:300)) %>%
+    tibble::as_tibble(rownames = "doc_id", .name_repair = "minimal") %>%
     dplyr::rename(eid = doc_id) %>%
     dplyr::mutate(across(where(is.numeric), ~as.numeric(.x))) %>%
     dplyr::mutate(across(where(is.numeric), ~dplyr::if_else(is.na(.x), 0, .x)))
@@ -556,6 +560,7 @@ assign_home <- function(txt, col = ald_clean,
 #' @param site_xy data frame with site_code, easting northing of the hospital sites, if NULL uses the package default
 #' @param debug boolean, if TRUE the output is much more voluminous and can be used to troubleshoot matching issues
 #' @param home_fn function to be used to assign home, returns vector of "home"/"other" values
+#' @param ... to be passed through, particularly w2v_file if using the assign_home function
 #'
 #' @details extracts all the postcode variants (full, sector, district), flags if home
 #'
